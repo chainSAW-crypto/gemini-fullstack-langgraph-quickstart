@@ -26,7 +26,7 @@ export const InputForm: React.FC<InputFormProps> = ({
 }) => {
   const [internalInputValue, setInternalInputValue] = useState("");
   const [effort, setEffort] = useState("medium");
-  const [model, setModel] = useState("gemini-2.5-flash-preview-04-17");
+  const [model, setModel] = useState("deepseek-r1-distill-llama-70b");
 
   const handleInternalSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -136,27 +136,35 @@ export const InputForm: React.FC<InputFormProps> = ({
               </SelectTrigger>
               <SelectContent className="bg-neutral-700 border-neutral-600 text-neutral-300 cursor-pointer">
                 <SelectItem
-                  value="gemini-2.0-flash"
+                  value="deepseek-r1-distill-llama-70b"
                   className="hover:bg-neutral-600 focus:bg-neutral-600 cursor-pointer"
                 >
                   <div className="flex items-center">
-                    <Zap className="h-4 w-4 mr-2 text-yellow-400" /> 2.0 Flash
+                    <Brain className="h-4 w-4 mr-2 text-purple-400" /> DeepSeek-R1 70B
                   </div>
                 </SelectItem>
                 <SelectItem
-                  value="gemini-2.5-flash-preview-04-17"
+                  value="llama-3.1-70b-versatile"
                   className="hover:bg-neutral-600 focus:bg-neutral-600 cursor-pointer"
                 >
                   <div className="flex items-center">
-                    <Zap className="h-4 w-4 mr-2 text-orange-400" /> 2.5 Flash
+                    <Brain className="h-4 w-4 mr-2 text-green-400" /> Llama 3.1 70B
                   </div>
                 </SelectItem>
                 <SelectItem
-                  value="gemini-2.5-pro-preview-05-06"
+                  value="mixtral-8x7b-32768"
                   className="hover:bg-neutral-600 focus:bg-neutral-600 cursor-pointer"
                 >
                   <div className="flex items-center">
-                    <Cpu className="h-4 w-4 mr-2 text-purple-400" /> 2.5 Pro
+                    <Zap className="h-4 w-4 mr-2 text-orange-400" /> Mixtral 8x7B
+                  </div>
+                </SelectItem>
+                <SelectItem
+                  value="llama-3.3-70b-versatile"
+                  className="hover:bg-neutral-600 focus:bg-neutral-600 cursor-pointer"
+                >
+                  <div className="flex items-center">
+                    <Cpu className="h-4 w-4 mr-2 text-blue-400" /> Llama 3.3 70B
                   </div>
                 </SelectItem>
               </SelectContent>

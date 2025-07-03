@@ -9,23 +9,23 @@ class Configuration(BaseModel):
     """The configuration for the agent."""
 
     query_generator_model: str = Field(
-        default="gemini-2.0-flash",
+        default="deepseek-r1-distill-llama-70b",
         metadata={
-            "description": "The name of the language model to use for the agent's query generation."
+            "description": "The name of the language model to use for the agent's query generation with reasoning."
         },
     )
 
     reflection_model: str = Field(
-        default="gemini-2.5-flash",
+        default="deepseek-r1-distill-llama-70b",
         metadata={
-            "description": "The name of the language model to use for the agent's reflection."
+            "description": "The name of the language model to use for the agent's reflection with advanced reasoning."
         },
     )
 
     answer_model: str = Field(
-        default="gemini-2.5-pro",
+        default="deepseek-r1-distill-llama-70b",
         metadata={
-            "description": "The name of the language model to use for the agent's answer."
+            "description": "The name of the language model to use for the agent's answer generation with reasoning."
         },
     )
 

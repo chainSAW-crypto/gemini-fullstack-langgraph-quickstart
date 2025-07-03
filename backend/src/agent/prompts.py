@@ -47,16 +47,32 @@ Research Topic:
 {research_topic}
 """
 
-reflection_instructions = """You are an expert research assistant analyzing summaries about "{research_topic}".
+reflection_instructions = """You are an expert research assistant with advanced reasoning capabilities (DeepSeek-R1) analyzing summaries about "{research_topic}".
+
+<think>
+Let me carefully analyze the research summaries step by step:
+
+1. First, I'll examine what aspects of the research topic are comprehensively covered in the current summaries
+2. Then, I'll identify any critical information gaps that would prevent providing a complete answer
+3. Next, I'll consider what additional perspectives, data, or details might be missing
+4. I'll evaluate whether the current information is sufficient to answer the user's original question
+5. Finally, I'll determine what specific follow-up queries would best address any identified gaps
+
+Let me work through this systematically...
+</think>
 
 Instructions:
-- Identify knowledge gaps or areas that need deeper exploration and generate a follow-up query. (1 or multiple).
-- If provided summaries are sufficient to answer the user's question, don't generate a follow-up query.
-- If there is a knowledge gap, generate a follow-up query that would help expand your understanding.
-- Focus on technical details, implementation specifics, or emerging trends that weren't fully covered.
+- Use your advanced reasoning capabilities to deeply analyze the research summaries
+- Think step-by-step about the completeness and quality of the information
+- Identify knowledge gaps or areas that need deeper exploration and generate follow-up queries (1 or multiple)
+- If provided summaries are sufficient to answer the user's question, don't generate a follow-up query
+- If there is a knowledge gap, generate a follow-up query that would help expand understanding
+- Focus on technical details, implementation specifics, emerging trends, or alternative perspectives not yet explored
+- Consider counterarguments, edge cases, or different viewpoints that haven't been addressed
 
 Requirements:
-- Ensure the follow-up query is self-contained and includes necessary context for web search.
+- Ensure follow-up queries are self-contained and include necessary context for web search
+- Think critically about what information is truly missing versus what is merely incomplete
 
 Output Format:
 - Format your response as a JSON object with these exact keys:
@@ -79,11 +95,26 @@ Summaries:
 {summaries}
 """
 
-answer_instructions = """Generate a high-quality answer to the user's question based on the provided summaries.
+answer_instructions = """You are an expert research analyst with DeepSeek-R1's advanced reasoning capabilities. Generate a high-quality answer to the user's question based on the provided summaries.
+
+<think>
+Let me systematically approach this final analysis:
+
+1. What is the core question the user is asking, and what are the key components I need to address?
+2. How do the different research summaries relate to each other? Are there complementary insights or contradictions?
+3. What are the main themes, patterns, and conclusions that emerge from synthesizing all the information?
+4. Are there any uncertainties, limitations, or areas where the evidence is mixed?
+5. What is the most logical, comprehensive, and well-structured way to present this information?
+6. How can I ensure my answer is both thorough and accessible?
+
+Let me work through this step-by-step to provide the best possible response...
+</think>
 
 Instructions:
-- The current date is {current_date}.
-- You are the final step of a multi-step research process, don't mention that you are the final step. 
+- The current date is {current_date}
+- Use your advanced reasoning capabilities to synthesize information from multiple summaries
+- Think step-by-step through the logical connections between different pieces of information
+- You are the final step of a multi-step research process, don't mention that you are the final step 
 - You have access to all the information gathered from the previous steps.
 - You have access to the user's question.
 - Generate a high-quality answer to the user's question based on the provided summaries and the user's question.

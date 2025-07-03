@@ -7,7 +7,8 @@ from langgraph.types import Send
 from langgraph.graph import StateGraph
 from langgraph.graph import START, END
 from langchain_core.runnables import RunnableConfig
-from google.genai import Client
+from langchain_groq import ChatGroq
+from tavily import TavilyClient
 
 from agent.state import (
     OverallState,
@@ -15,6 +16,7 @@ from agent.state import (
     ReflectionState,
     WebSearchState,
 )
+
 from agent.configuration import Configuration
 from agent.prompts import (
     get_current_date,
@@ -23,29 +25,25 @@ from agent.prompts import (
     reflection_instructions,
     answer_instructions,
 )
-from langchain_google_genai import ChatGoogleGenerativeAI
 from agent.utils import (
-    get_citations,
     get_research_topic,
-    insert_citation_markers,
-    resolve_urls,
 )
 
 load_dotenv()
 
-if os.getenv("GEMINI_API_KEY") is None:
-    raise ValueError("GEMINI_API_KEY is not set")
+if os.getenv("GROQ_API_KEY") is None:
+    raise ValueError("GROQ_API_KEY is not set")
 
-# Used for Google Search API
-genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
+if os.getenv("TAVILY_API_KEY") is None:
+    raise ValueError("TAVILY_API_KEY is not set")
 
 
 # Nodes
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
     """LangGraph node that generates search queries based on the User's question.
 
-    Uses Gemini 2.0 Flash to create an optimized search queries for web research based on
-    the User's question.
+    Uses DeepSeek-R1 to create optimized search queries for web research based on
+    the User's question with advanced reasoning capabilities.
 
     Args:
         state: Current graph state containing the User's question
@@ -60,25 +58,72 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     if state.get("initial_search_query_count") is None:
         state["initial_search_query_count"] = configurable.number_of_initial_queries
 
-    # init Gemini 2.0 Flash
-    llm = ChatGoogleGenerativeAI(
+    # init DeepSeek-R1 model
+    llm = ChatGroq(
         model=configurable.query_generator_model,
         temperature=1.0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
+        api_key=os.getenv("GROQ_API_KEY"),
     )
-    structured_llm = llm.with_structured_output(SearchQueryList)
 
-    # Format the prompt
+    # Format the prompt with JSON output instruction
     current_date = get_current_date()
     formatted_prompt = query_writer_instructions.format(
         current_date=current_date,
         research_topic=get_research_topic(state["messages"]),
         number_queries=state["initial_search_query_count"],
     )
+    
+    # Add JSON format instruction to the prompt
+    json_prompt = f"""{formatted_prompt}
+
+Please provide your response in JSON format with the following structure:
+{{"query": ["search query 1", "search query 2", "search query 3"]}}
+
+Make sure to provide exactly {state["initial_search_query_count"]} search queries."""
+
     # Generate the search queries
-    result = structured_llm.invoke(formatted_prompt)
-    return {"search_query": result.query}
+    try:
+        response = llm.invoke(json_prompt)
+        content = response.content
+        
+        # Try to parse JSON from the response
+        import json
+        import re
+        
+        # Extract JSON from the response (handle markdown code blocks)
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Try to find JSON without code blocks
+            json_match = re.search(r'\{.*?"query".*?\}', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                # Fallback: create queries from the text response
+                lines = content.strip().split('\n')
+                queries = [line.strip().strip('-').strip() for line in lines if line.strip() and not line.startswith('#')]
+                queries = [q for q in queries if len(q) > 10][:state["initial_search_query_count"]]
+                if not queries:
+                    queries = [get_research_topic(state["messages"])]
+                return {"search_query": queries}
+        
+        parsed_result = json.loads(json_str)
+        queries = parsed_result.get("query", [])
+        
+        # Ensure we have the right number of queries
+        if not queries:
+            queries = [get_research_topic(state["messages"])]
+        elif len(queries) > state["initial_search_query_count"]:
+            queries = queries[:state["initial_search_query_count"]]
+        
+        return {"search_query": queries}
+        
+    except Exception as e:
+        print(f"Error generating queries: {e}")
+        # Fallback to the original research topic
+        return {"search_query": [get_research_topic(state["messages"])]}
 
 
 def continue_to_web_research(state: QueryGenerationState):
@@ -93,9 +138,9 @@ def continue_to_web_research(state: QueryGenerationState):
 
 
 def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
-    """LangGraph node that performs web research using the native Google Search API tool.
+    """LangGraph node that performs web research using Tavily Search API.
 
-    Executes a web search using the native Google Search API tool in combination with Gemini 2.0 Flash.
+    Executes a web search using Tavily API and processes results with DeepSeek-R1.
 
     Args:
         state: Current graph state containing the search query and research loop count
@@ -106,33 +151,80 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
     """
     # Configure
     configurable = Configuration.from_runnable_config(config)
+    
+    # Initialize Tavily client
+    tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+    
+    # Perform search with Tavily
+    try:
+        search_results = tavily_client.search(
+            query=state["search_query"],
+            search_depth="advanced",
+            max_results=5,
+            include_answer=True,
+            include_raw_content=True
+        )
+    except Exception as e:
+        print(f"Tavily search failed: {e}")
+        # Return empty results if search fails
+        return {
+            "sources_gathered": [],
+            "search_query": [state["search_query"]],
+            "web_research_result": [f"Search failed for query: {state['search_query']}"],
+        }
+    
+    # Initialize DeepSeek-R1 model for processing search results
+    llm = ChatGroq(
+        model=configurable.query_generator_model,
+        temperature=0,
+        max_retries=2,
+        api_key=os.getenv("GROQ_API_KEY"),
+    )
+    
+    # Format search results for LLM processing
+    search_context = "\n\n---\n\n".join([
+        f"Title: {result['title']}\nURL: {result['url']}\nContent: {result['content'][:1000]}..."
+        for result in search_results.get('results', [])
+    ])
+    
+    # Get web searcher instructions and format prompt
     formatted_prompt = web_searcher_instructions.format(
         current_date=get_current_date(),
         research_topic=state["search_query"],
     )
+    
+    # Add search results to the prompt
+    full_prompt = f"""{formatted_prompt}
 
-    # Uses the google genai client as the langchain client doesn't return grounding metadata
-    response = genai_client.models.generate_content(
-        model=configurable.query_generator_model,
-        contents=formatted_prompt,
-        config={
-            "tools": [{"google_search": {}}],
-            "temperature": 0,
-        },
-    )
-    # resolve the urls to short urls for saving tokens and time
-    resolved_urls = resolve_urls(
-        response.candidates[0].grounding_metadata.grounding_chunks, state["id"]
-    )
-    # Gets the citations and adds them to the generated text
-    citations = get_citations(response, resolved_urls)
-    modified_text = insert_citation_markers(response.text, citations)
-    sources_gathered = [item for citation in citations for item in citation["segments"]]
+Search Results:
+{search_context}
 
+Based on these search results, provide a comprehensive analysis and summary of the information related to: {state["search_query"]}
+Include key insights, findings, and relevant details from the sources."""
+    
+    # Process with DeepSeek-R1
+    try:
+        response = llm.invoke(full_prompt)
+        research_result = response.content
+    except Exception as e:
+        print(f"LLM processing failed: {e}")
+        research_result = f"Failed to process search results for: {state['search_query']}"
+    
+    # Format sources for consistency with the original format
+    sources_gathered = []
+    for i, result in enumerate(search_results.get('results', [])):
+        source = {
+            "title": result.get("title", ""),
+            "url": result.get("url", ""),
+            "short_url": result.get("url", ""),  # Tavily URLs are already clean
+            "value": result.get("url", "")
+        }
+        sources_gathered.append(source)
+    
     return {
         "sources_gathered": sources_gathered,
         "search_query": [state["search_query"]],
-        "web_research_result": [modified_text],
+        "web_research_result": [research_result],
     }
 
 
@@ -162,22 +254,74 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
         research_topic=get_research_topic(state["messages"]),
         summaries="\n\n---\n\n".join(state["web_research_result"]),
     )
-    # init Reasoning Model
-    llm = ChatGoogleGenerativeAI(
+    
+    # Add JSON format instruction to the prompt
+    json_prompt = f"""{formatted_prompt}
+
+Please provide your response in JSON format with the following structure:
+{{
+    "is_sufficient": true/false,
+    "knowledge_gap": "description of knowledge gaps",
+    "follow_up_queries": ["query 1", "query 2", ...]
+}}
+
+Make sure to return valid JSON."""
+
+    # init Reasoning Model with thinking capabilities
+    llm = ChatGroq(
         model=reasoning_model,
         temperature=1.0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
+        api_key=os.getenv("GROQ_API_KEY"),
     )
-    result = llm.with_structured_output(Reflection).invoke(formatted_prompt)
-
-    return {
-        "is_sufficient": result.is_sufficient,
-        "knowledge_gap": result.knowledge_gap,
-        "follow_up_queries": result.follow_up_queries,
-        "research_loop_count": state["research_loop_count"],
-        "number_of_ran_queries": len(state["search_query"]),
-    }
+    
+    try:
+        response = llm.invoke(json_prompt)
+        content = response.content
+        
+        # Try to parse JSON from the response
+        import json
+        import re
+        
+        # Extract JSON from the response (handle markdown code blocks)
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Try to find JSON without code blocks
+            json_match = re.search(r'\{.*?"is_sufficient".*?\}', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                # Fallback: assume research is sufficient
+                return {
+                    "is_sufficient": True,
+                    "knowledge_gap": "Unable to parse reflection response",
+                    "follow_up_queries": [],
+                    "research_loop_count": state["research_loop_count"],
+                    "number_of_ran_queries": len(state["search_query"]),
+                }
+        
+        parsed_result = json.loads(json_str)
+        
+        return {
+            "is_sufficient": parsed_result.get("is_sufficient", True),
+            "knowledge_gap": parsed_result.get("knowledge_gap", ""),
+            "follow_up_queries": parsed_result.get("follow_up_queries", []),
+            "research_loop_count": state["research_loop_count"],
+            "number_of_ran_queries": len(state["search_query"]),
+        }
+        
+    except Exception as e:
+        print(f"Error in reflection: {e}")
+        # Fallback: assume research is sufficient
+        return {
+            "is_sufficient": True,
+            "knowledge_gap": f"Error processing reflection: {e}",
+            "follow_up_queries": [],
+            "research_loop_count": state["research_loop_count"],
+            "number_of_ran_queries": len(state["search_query"]),
+        }
 
 
 def evaluate_research(
@@ -241,23 +385,22 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
         summaries="\n---\n\n".join(state["web_research_result"]),
     )
 
-    # init Reasoning Model, default to Gemini 2.5 Flash
-    llm = ChatGoogleGenerativeAI(
+    # init Reasoning Model with Groq
+    llm = ChatGroq(
         model=reasoning_model,
         temperature=0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
+        api_key=os.getenv("GROQ_API_KEY"),
     )
     result = llm.invoke(formatted_prompt)
 
-    # Replace the short urls with the original urls and add all used urls to the sources_gathered
+    # Format sources for final answer (simplified since Tavily URLs are clean)
     unique_sources = []
+    seen_urls = set()
     for source in state["sources_gathered"]:
-        if source["short_url"] in result.content:
-            result.content = result.content.replace(
-                source["short_url"], source["value"]
-            )
+        if source["url"] not in seen_urls:
             unique_sources.append(source)
+            seen_urls.add(source["url"])
 
     return {
         "messages": [AIMessage(content=result.content)],
