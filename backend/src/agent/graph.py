@@ -1,4 +1,6 @@
 import os
+import json
+import re
 
 from agent.tools_and_schemas import SearchQueryList, Reflection
 from dotenv import load_dotenv
@@ -37,6 +39,38 @@ if os.getenv("GROQ_API_KEY") is None:
 if os.getenv("TAVILY_API_KEY") is None:
     raise ValueError("TAVILY_API_KEY is not set")
 
+# Valid model names for Groq API
+VALID_GROQ_MODELS = [
+    "deepseek-r1-distill-llama-70b",
+    "llama-3.1-70b-versatile", 
+    "mixtral-8x7b-32768",
+    "llama-3.3-70b-versatile"
+]
+
+def get_validated_model(state_model: str, fallback_model: str) -> str:
+    """
+    Validates and returns a valid Groq model name.
+    
+    Args:
+        state_model: Model name from state (may be invalid)
+        fallback_model: Fallback model from configuration
+    
+    Returns:
+        Valid model name
+    """
+    if state_model and state_model in VALID_GROQ_MODELS:
+        print(f"Using model from state: {state_model}")
+        return state_model
+    
+    if fallback_model in VALID_GROQ_MODELS:
+        print(f"Using fallback model: {fallback_model} (invalid state model: {state_model})")
+        return fallback_model
+    
+    # Final safety net
+    default_model = "deepseek-r1-distill-llama-70b"
+    print(f"Using default model: {default_model} (invalid state: {state_model}, invalid fallback: {fallback_model})")
+    return default_model
+
 
 # Nodes
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
@@ -58,9 +92,15 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     if state.get("initial_search_query_count") is None:
         state["initial_search_query_count"] = configurable.number_of_initial_queries
 
-    # init DeepSeek-R1 model
+    # Get validated model for query generation
+    query_model = get_validated_model(
+        state.get("reasoning_model"), 
+        configurable.query_generator_model
+    )
+    
+    # init model
     llm = ChatGroq(
-        model=configurable.query_generator_model,
+        model=query_model,
         temperature=1.0,
         max_retries=2,
         api_key=os.getenv("GROQ_API_KEY"),
@@ -173,9 +213,15 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
             "web_research_result": [f"Search failed for query: {state['search_query']}"],
         }
     
-    # Initialize DeepSeek-R1 model for processing search results
+    # Get validated model for web research processing
+    research_model = get_validated_model(
+        state.get("reasoning_model"), 
+        configurable.query_generator_model
+    )
+    
+    # Initialize model for processing search results
     llm = ChatGroq(
-        model=configurable.query_generator_model,
+        model=research_model,
         temperature=0,
         max_retries=2,
         api_key=os.getenv("GROQ_API_KEY"),
@@ -245,7 +291,12 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
     configurable = Configuration.from_runnable_config(config)
     # Increment the research loop count and get the reasoning model
     state["research_loop_count"] = state.get("research_loop_count", 0) + 1
-    reasoning_model = state.get("reasoning_model", configurable.reflection_model)
+
+    # Get validated model for reflection
+    reasoning_model = get_validated_model(
+        state.get("reasoning_model"), 
+        configurable.reflection_model
+    )
 
     # Format the prompt
     current_date = get_current_date()
@@ -375,7 +426,12 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
         Dictionary with state update, including running_summary key containing the formatted final summary with sources
     """
     configurable = Configuration.from_runnable_config(config)
-    reasoning_model = state.get("reasoning_model") or configurable.answer_model
+    
+    # Get validated model for final answer generation
+    reasoning_model = get_validated_model(
+        state.get("reasoning_model"), 
+        configurable.answer_model
+    )
 
     # Format the prompt
     current_date = get_current_date()

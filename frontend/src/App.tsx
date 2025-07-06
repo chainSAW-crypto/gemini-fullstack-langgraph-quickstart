@@ -102,6 +102,20 @@ export default function App() {
   const handleSubmit = useCallback(
     (submittedInputValue: string, effort: string, model: string) => {
       if (!submittedInputValue.trim()) return;
+      
+      // Validate model name
+      const validModels = [
+        "deepseek-r1-distill-llama-70b",
+        "llama-3.1-70b-versatile", 
+        "mixtral-8x7b-32768",
+        "llama-3.3-70b-versatile"
+      ];
+      
+      const validatedModel = validModels.includes(model) ? model : "deepseek-r1-distill-llama-70b";
+      if (model !== validatedModel) {
+        console.warn(`Invalid model "${model}" provided, using fallback: ${validatedModel}`);
+      }
+      
       setProcessedEventsTimeline([]);
       hasFinalizeEventOccurredRef.current = false;
 
@@ -134,11 +148,14 @@ export default function App() {
           id: Date.now().toString(),
         },
       ];
+      
+      console.log("Submitting with model:", validatedModel); // Debug log
+      
       thread.submit({
         messages: newMessages,
         initial_search_query_count: initial_search_query_count,
         max_research_loops: max_research_loops,
-        reasoning_model: model,
+        reasoning_model: validatedModel,
       });
     },
     [thread]
